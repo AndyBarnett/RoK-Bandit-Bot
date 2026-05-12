@@ -93,7 +93,7 @@ async def bandit(ctx, region, email, password):
         if not output.strip():
             output = "(no output)"
 
-        await ctx.send(f"```{output[:1900]}```")
+        await ctx.send(f"{output[:1900]}")
 
     except subprocess.TimeoutExpired:
         await ctx.send("```ERROR: poll_bandits.exe timed out```")
