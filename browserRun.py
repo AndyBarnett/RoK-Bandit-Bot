@@ -1,6 +1,9 @@
 import sys
-import time
+import os
 from playwright.sync_api import sync_playwright
+
+
+SESSION_FILE = "session.json"
 
 
 class GameBrowser:
@@ -10,55 +13,51 @@ class GameBrowser:
         self.context = None
         self.page = None
 
-        # captured values
-        self.auth_token = None
-        self.client_version = None
-
     # =========================
-    # LIFECYCLE
+    # START
     # =========================
 
     def start(self, email: str, password: str):
+        self.delete_session_file()
+
         self.pw = sync_playwright().start()
 
         self.browser = self.pw.chromium.launch(
             headless=False,
+            proxy={
+                "server": "http://127.0.0.1:8080"
+            },
             args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
+                "--ignore-certificate-errors",
+                "--disable-quic"
             ]
         )
 
-        self.context = self.browser.new_context()
+        self.context = self.browser.new_context(
+            ignore_https_errors=True
+        )
+
         self.page = self.context.new_page()
 
-        self.attach_network_logging()
+        print("[INFO] Opening game")
 
-        self.open_login_page()
-        self.dismiss_cookies()
+        self.page.goto(
+            "https://am0.riseofcultures.com",
+            wait_until="domcontentloaded"
+        )
+
+        self.dismiss_cookie_banner()
         self.login(email, password)
 
-        print("[INFO] Login submitted")
+        print("[INFO] Login submitted, browser exiting")
 
-    def close(self):
-        if self.browser:
-            self.browser.close()
-        if self.pw:
-            self.pw.stop()
+        self.close()
 
     # =========================
-    # NAVIGATION
+    # LOGIN FLOW
     # =========================
 
-    def open_login_page(self):
-        self.page.goto("https://am0.riseofcultures.com", wait_until="domcontentloaded")
-
-    # =========================
-    # COOKIE BANNER
-    # =========================
-
-    def dismiss_cookies(self):
+    def dismiss_cookie_banner(self):
         try:
             self.page.click(
                 "#pop-up_cookie_button_accept",
@@ -66,72 +65,55 @@ class GameBrowser:
             )
             print("[INFO] Cookie banner dismissed")
         except Exception:
-            print("[INFO] Cookie banner not present")
-
-
-    # =========================
-    # LOGIN FLOW
-    # =========================
+            print("[INFO] No cookie banner found")
 
     def login(self, email: str, password: str):
-        self.page.fill("#page_login_always-visible_input_player-identifier", email)
-        self.page.fill("#page_login_always-visible_input_password", password)
-        self.page.click("#page_login_always-visible_button_login")
+        print("[LOGIN] Filling credentials")
+
+        self.page.fill(
+            "#page_login_always-visible_input_player-identifier",
+            email
+        )
+
+        self.page.fill(
+            "#page_login_always-visible_input_password",
+            password
+        )
+
+        self.page.click(
+            "#page_login_always-visible_button_login"
+        )
+
+        print("[LOGIN] Submitted")
 
     # =========================
-    # NETWORK MONITORING
+    # CLEANUP
     # =========================
 
-    def attach_network_logging(self):
-        self.page.on("request", self._on_request)
+    def delete_session_file(self):
+        if os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)
+            print(f"[INFO] Deleted existing {SESSION_FILE}")
 
-    def _on_request(self, request):
-        url = request.url
+    def close(self):
+        if self.browser:
+            self.browser.close()
 
-        if "/game/startup" in url and "am2.riseofcultures.com" in url:
-            headers = request.all_headers()
-
-            self.auth_token = headers.get("x-auth-token")
-            self.client_version = headers.get("x-clientversion")
-
-            print("\n[GAME STARTUP REQUEST CAPTURED]")
-
-            print("URL:", url)
-            print("X-AUTH-TOKEN:", self.auth_token)
-            print("X-ClientVersion:", self.client_version)
-
-    # =========================
-    # DEBUG HELPERS
-    # =========================
-
-    def print_captured(self):
-        print("\n--- CAPTURED VALUES ---")
-        print("Auth Token:", self.auth_token)
-        print("Client Version:", self.client_version)
+        if self.pw:
+            self.pw.stop()
 
 
-# =========================================================
-# RUN SCRIPT
-# =========================================================
+# =========================
+# ENTRY POINT
+# =========================
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python script.py <email> <password>")
+        print("Usage: python browserRun.py <email> <password>")
         sys.exit(1)
 
     email = sys.argv[1]
     password = sys.argv[2]
 
     browser = GameBrowser()
-
-    try:
-        browser.start(email, password)
-
-        print("[INFO] Running... watching network")
-
-        while True:
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-        browser.print_captured()
-        browser.close()
+    browser.start(email, password)
