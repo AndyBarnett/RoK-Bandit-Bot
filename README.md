@@ -1,3 +1,8 @@
+Install link: https://discord.com/oauth2/authorize?client_id=1502479609701203998
+Instructions are in the description of the discord bot
+
+Here is a  dump of generic instructions for getting it working on a windows server:
+
 encode all py and txt files as UTF-8
 
 setup.py
