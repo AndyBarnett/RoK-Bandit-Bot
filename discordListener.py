@@ -1,18 +1,10 @@
-import json
-import subprocess
 import sys
+import os
+import subprocess
 import discord
 from discord.ext import commands
-import time
-import os
-import shutil
-import socket
+from session_utils import load_session
 
-SESSION_FILE = "session.json"
-
-# =========================
-# BOOTSTRAP
-# =========================
 
 if len(sys.argv) < 2:
     print("Usage: python discordListener.py <DISCORD_BOT_TOKEN>")
@@ -20,146 +12,69 @@ if len(sys.argv) < 2:
 
 TOKEN = sys.argv[1]
 
+SNIFFER_FILE = "sniffer.py"
+BROWSER_FILE = "browserRun.py"
+
+
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# =========================
-# SESSION HELPERS
-# =========================
-
-def wait_for_session_file(timeout=60):
-    start = time.time()
-
-    while True:
-        if time.time() - start > timeout:
-            raise Exception("Timed out waiting for session.json")
-
-        try:
-            with open(SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            if data.get("auth_token") and data.get("client_version"):
-                return data
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-
-# =========================
-# MITM STARTUP
-# =========================
-
-    print("[INFO] Starting mitmdump", flush=True)
-
-    mitmdump_path = shutil.which("mitmdump")
-
-    if not mitmdump_path:
-        raise Exception("mitmdump not found in PATH")
-
-    process = subprocess.Popen(
-        [
-            mitmdump_path,
-            "-p",
-            "8080",
-            "-s",
-            os.path.abspath("sniffer.py")
-        ],
-        cwd=os.getcwd(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-
-    print("[INFO] mitmdump launched", flush=True)
-
-    return process
 def start_sniffer():
-    print("[INFO] Starting mitmdump", flush=True)
+    sniffer_path = os.path.abspath(SNIFFER_FILE)
 
-    mitmdump_path = shutil.which("mitmdump")
-
-    if not mitmdump_path:
-        raise Exception("mitmdump not found in PATH")
-
-    sniffer_path = os.path.abspath("sniffer.py")
-
-    process = subprocess.Popen(
+    return subprocess.Popen(
         [
-            mitmdump_path,
-            "-p",
-            "8080",
-            "-s",
-            sniffer_path
-        ],
-        cwd=os.path.dirname(sniffer_path),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+            "mitmdump",
+            "-p", "8080",
+            "-s", sniffer_path
+        ]
     )
 
-    print("[INFO] mitmdump launched", flush=True)
-    return process
 
-# =========================
-# DISCORD COMMAND
-# =========================
-# !bandit <region> <email> <password>
-# =========================
+def start_browser(email, password):
+    browser_path = os.path.abspath(BROWSER_FILE)
+
+    return subprocess.Popen(
+        [
+            "python",
+            browser_path,
+            email,
+            password
+        ]
+    )
+
 
 @bot.command()
 async def bandit(ctx, region, email, password):
-    print(f"[bandit] {ctx.author} -> {ctx.message.content}", flush=True)
-
-    await ctx.send("```Starting automation flow...```")
-
-    sniffer = None
-
+    await ctx.send("```Logging in with browser and getting auth token...```")
     try:
-        # -------------------------
-        # 1. Start MITM proxy
-        # -------------------------
-        sniffer = start_sniffer()
+        sniffer_proc = start_sniffer()
+        browser_proc = start_browser(email, password)
 
-        # -------------------------
-        # 2. Run browser automation
-        # -------------------------
-        await ctx.send("```Launching browser...```")
+        browser_proc.wait()
 
-        result = subprocess.run(
-            ["python", "browserRun.py", email, password],
-            capture_output=True,
-            text=True
-        )
+        # wait for session file (hard gate)
+        for _ in range(30):
+            if os.path.exists("session.json"):
+                break
+            time.sleep(1)
+        else:
+            await ctx.send("```ERROR: session.json not found```")
+            return
 
-        print(result.stdout, flush=True)
-        print(result.stderr, flush=True)
+        session = load_session()
 
-        if result.returncode != 0:
-            raise Exception("browserRun.py failed")
+        auth_token = session.get("auth_token")
+        client_version = session.get("client_version")
 
-        # -------------------------
-        # 3. Wait for session
-        # -------------------------
-        await ctx.send("```Waiting for session capture...```")
+        if not auth_token or not client_version:
+            await ctx.send("```ERROR: invalid session data```")
+            return
 
-        session = wait_for_session_file()
-
-        auth_token = session["auth_token"]
-        client_version = session["client_version"]
-
-        print("[SESSION] Captured", flush=True)
-        print("Auth:", auth_token, flush=True)
-        print("Client:", client_version, flush=True)
-
-        await ctx.send("```Session captured```")
-
-        # -------------------------
-        # 4. Run game exe
-        # -------------------------
-        await ctx.send("```Running request...```")
+        await ctx.send("```Running special exe with the info provided and found...```")
 
         result = subprocess.run(
             [
@@ -169,30 +84,28 @@ async def bandit(ctx, region, email, password):
                 client_version
             ],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=120
         )
 
-        output = result.stdout + result.stderr
+        output = (result.stdout or "") + (result.stderr or "")
 
-        if not output:
+        if not output.strip():
             output = "(no output)"
 
         await ctx.send(f"```{output[:1900]}```")
 
+    except subprocess.TimeoutExpired:
+        await ctx.send("```ERROR: poll_bandits.exe timed out```")
+
     except Exception as e:
-        await ctx.send(f"```ERROR:\n{str(e)}```")
+        await ctx.send(f"```ERROR:\n{repr(e)}```")
 
     finally:
-        if sniffer:
-            try:
-                sniffer.kill()
-                print("[INFO] mitmdump stopped", flush=True)
-            except Exception:
-                pass
+        try:
+            sniffer_proc.terminate()
+        except:
+            pass
 
-
-# =========================
-# START BOT
-# =========================
 
 bot.run(TOKEN)
