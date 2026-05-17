@@ -46,10 +46,25 @@ def start_browser(email, password):
             password
         ]
     )
-	
+
+
+def clean_output(text):
+    lines = []
+
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        # remove unwanted process noise
+        if stripped.startswith("Process with ID") and "not found" in stripped:
+            continue
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 def add_relative_times(text):
     updated_lines = []
-
     in_upcoming = False
 
     for line in text.splitlines():
@@ -85,6 +100,7 @@ def add_relative_times(text):
 @bot.command()
 async def bandit(ctx, region, email, password):
     await ctx.send("```Logging in with browser and getting auth token...```")
+
     try:
         sniffer_proc = start_sniffer()
         browser_proc = start_browser(email, password)
@@ -124,6 +140,9 @@ async def bandit(ctx, region, email, password):
         )
 
         output = (result.stdout or "") + (result.stderr or "")
+
+        # NEW PIPELINE STEP
+        output = clean_output(output)
         output = add_relative_times(output)
 
         if not output.strip():
