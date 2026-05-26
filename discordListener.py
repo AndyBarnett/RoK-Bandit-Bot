@@ -74,7 +74,16 @@ def clean_output(text):
 
         lines.append(line)
 
-    return "\n".join(lines)
+    cleaned = "\n".join(lines)
+
+    # restore newline after Upcoming header
+    cleaned = re.sub(
+        r"(### Upcoming)\s*",
+        r"\1\n",
+        cleaned
+    )
+
+    return cleaned
 
 
 def add_relative_times(text):
@@ -137,6 +146,7 @@ async def bandit(ctx, region, email, password):
 
         browser_proc.wait()
 
+        # wait for session file
         for _ in range(30):
             if os.path.exists("session.json"):
                 break
@@ -184,11 +194,12 @@ async def bandit(ctx, region, email, password):
         if not output.strip():
             output = "(no output)"
 
+        # split at LAST occurrence of "Upcoming"
         parts = output.rsplit("Upcoming", 1)
 
         if len(parts) == 2:
             first_part = parts[0].strip()
-            second_part = "Upcoming" + parts[1].strip()
+            second_part = "Upcoming\n" + parts[1].strip()
         else:
             first_part = output
             second_part = ""
@@ -196,9 +207,11 @@ async def bandit(ctx, region, email, password):
         first_part = first_part[:1900]
         second_part = second_part[:1900]
 
+        # send first half
         if first_part:
             await ctx.send(first_part)
 
+        # send second half
         if second_part:
             await ctx.send(second_part)
 
