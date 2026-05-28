@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 from session_utils import load_session
 import re
+import asyncio
 
 
 if len(sys.argv) < 2:
@@ -41,7 +42,7 @@ def start_browser(email, password):
 
     return subprocess.Popen(
         [
-            "python",
+            sys.executable,
             browser_path,
             email,
             password
@@ -144,13 +145,16 @@ async def bandit(ctx, region, email, password):
         sniffer_proc = start_sniffer()
         browser_proc = start_browser(email, password)
 
-        browser_proc.wait()
+        await asyncio.wait_for(
+            asyncio.to_thread(browser_proc.wait),
+            timeout=120
+        )
 
         # wait for session file
         for _ in range(30):
             if os.path.exists("session.json"):
                 break
-            time.sleep(1)
+            await asyncio.sleep(1)
         else:
             await ctx.send("```ERROR: session.json not found```")
             return
@@ -174,7 +178,8 @@ async def bandit(ctx, region, email, password):
             "```Running special exe with the info provided and found...```"
         )
 
-        result = subprocess.run(
+        result = await asyncio.to_thread(
+            subprocess.run,
             [
                 "poll_bandits.exe",
                 region,
@@ -194,12 +199,12 @@ async def bandit(ctx, region, email, password):
         if not output.strip():
             output = "(no output)"
 
-        # split at LAST occurrence of "Upcoming"
-        parts = output.rsplit("Upcoming", 1)
+        # split at LAST occurrence of "### Upcoming"
+        parts = output.rsplit("### Upcoming", 1)
 
         if len(parts) == 2:
             first_part = parts[0].strip()
-            second_part = "Upcoming\n" + parts[1].strip()
+            second_part = "### Upcoming\n" + parts[1].strip()
         else:
             first_part = output
             second_part = ""
@@ -214,6 +219,9 @@ async def bandit(ctx, region, email, password):
         # send second half
         if second_part:
             await ctx.send(second_part)
+
+    except asyncio.TimeoutError:
+        await ctx.send("```ERROR: browser login timed out```")
 
     except subprocess.TimeoutExpired:
         await ctx.send("```ERROR: poll_bandits.exe timed out```")
