@@ -147,7 +147,7 @@ async def bandit(ctx, region, email, password):
 
         await asyncio.wait_for(
             asyncio.to_thread(browser_proc.wait),
-            timeout=120
+            timeout=360
         )
 
         # wait for session file
@@ -210,6 +210,7 @@ async def bandit(ctx, region, email, password):
             second_part = ""
 
         first_part = first_part[:1900]
+        second_part = second_part[:1900]
         second_part = second_part[:1900]
 
         # send first half
